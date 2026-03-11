@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    com.invictus.sentinel.plist
+    Install to: /Library/LaunchDaemons/com.invictus.sentinel.plist
+    Load with:  sudo launchctl load /Library/LaunchDaemons/com.invictus.sentinel.plist
+    Owner:      root:wheel, permissions 644
+
+    KEY DECISIONS:
+
+    ProcessType = Interactive
+        Tells launchd to schedule this daemon at the highest QoS class
+        available to background daemons. Combined with the in-script
+        `renice -n -20`, this gives Sentinel two layers of priority:
+        one at the launchd scheduling level, one at the BSD nice level.
+
+    ThrottleInterval = 0
+        By default launchd imposes a 10s throttle between restarts on
+        crash. Setting to 0 removes this delay so Sentinel restarts
+        immediately if it ever exits unexpectedly (e.g. OOM kill).
+        Safe here because the script has its own sleep-based rate limiting.
+
+    RunAtLoad = true
+        Sentinel starts as soon as the plist is loaded, which on this
+        LaunchDaemon path happens very early in the boot sequence —
+        before most user-space services are running. This is as close
+        to a "preboot hook" as launchd allows without kernel extensions.
+
+    KeepAlive = true
+        launchd will restart Sentinel if it ever exits. Combined with
+        ThrottleInterval=0, this makes Sentinel effectively indestructible
+        from user-space.
+
+    AbandonProcessGroup = true
+        When launchd stops the daemon (e.g. on shutdown), it won't wait
+        for child processes (the ghost-eviction subshell, xargs children)
+        to exit before proceeding. Prevents shutdown delays.
+
+    NOTE ON "PREBOOT HOOKS":
+        There is no OpenCore or EFI mechanism that can run BSD sysctls
+        before the kernel boots — sysctls don't exist at that stage.
+        The true "earliest possible" injection point for sysctl tunables
+        on macOS is a LaunchDaemon with RunAtLoad=true at system boot,
+        which is exactly what this plist achieves. The 10s sleep in the
+        script is the only thing delaying injection, and it's necessary
+        for OCLP kext stability on this hardware.
+-->
+<plist version="1.0">
+<dict>
+
+    <key>Label</key>
+    <string>com.invictus.sentinel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/usr/local/bin/silent_sentinel.sh</string>
+    </array>
+
+    <!-- Start immediately at boot, before user session -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart immediately on exit, no throttle delay -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>0</integer>
+
+    <!-- Highest QoS class available to LaunchDaemons -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <!-- Don't block shutdown waiting for our subshells -->
+    <key>AbandonProcessGroup</key>
+    <true/>
+
+    <!-- Logging — tail -f /var/log/sentinel.log to observe -->
+    <key>StandardOutPath</key>
+    <string>/var/log/sentinel.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/sentinel.log</string>
+
+</dict>
+</plist>
